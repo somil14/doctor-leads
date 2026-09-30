@@ -1,0 +1,45 @@
+{
+  "name": "doctor-leads",
+  "version": "1.0.0",
+  "description": "Collect publicly listed doctors, clinics and hospitals via the Google Places API (New), then check and score their contact details.",
+  "type": "module",
+  "bin": {
+    "doctor-leads": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dry-run": "node src/index.js --dry-run",
+    "reprocess": "node src/index.js --max-calls 0",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "clean": "node -e \"require('node:fs').rmSync('output',{recursive:true,force:true})\"",
+    "clean:sites": "node -e \"require('node:fs').rmSync('cache/sites',{recursive:true,force:true})\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.3",
+    "csv-writer": "^1.6.0",
+    "dotenv": "^16.4.5",
+    "libphonenumber-js": "^1.13.14",
+    "p-limit": "^6.1.0"
+  },
+  "keywords": [
+    "google-places",
+    "lead-generation",
+    "healthcare",
+    "cli",
+    "india"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/somil14/doctor-leads.git"
+  },
+  "bugs": {
+    "url": "https://github.com/somil14/doctor-leads/issues"
+  },
+  "homepage": "https://github.com/somil14/doctor-leads#readme",
+  "author": "Somil Athole",
+  "license": "MIT"
+}

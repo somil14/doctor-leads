@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Collected data: raw API responses, fetched web pages, generated leads and
+# manually verified contacts. These hold real people's contact details and
+# must never be committed.
+cache/
+output/
+data/*
+!data/verified.example.csv
+
+# Logs and test output
+*.log
+npm-debug.log*
+coverage/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local tooling
+.claude/

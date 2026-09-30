@@ -1,0 +1,5 @@
+id,name,phone,email,consent,status,verifiedAt,notes
+ChIJexample0000000000000001,Dr. Example One,98765 43210,dr.one@example.org,yes,confirmed,2026-10-02,Spoke to the doctor; prefers email
+ChIJexample0000000000000002,Example Clinic,,,,confirmed,2026-10-02,Found phone is correct
+ChIJexample0000000000000003,Dr. Example Three,,,,wrong_number,2026-10-03,Number belongs to someone else
+ChIJexample0000000000000004,Example Medical Hall,,,,remove,2026-10-03,Pharmacy not a doctor
