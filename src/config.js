@@ -1,8 +1,13 @@
 /**
  * @module config
- * Static configuration for doctor-leads plus startup validation of the
- * configuration object and the process environment.
+ * Default configuration for doctor-leads, optional local overrides, and
+ * startup validation of the configuration and the process environment.
  */
+
+import { readFileSync } from "node:fs";
+
+/** Optional local overrides, read from the directory the tool is run in. */
+export const LOCAL_CONFIG_FILE = "./config.local.json";
 
 /**
  * @typedef {object} ApiConfig
@@ -48,17 +53,8 @@
 
 /** @type {Config} */
 export const config = {
-  towns: [
-    "Saharsa",
-    "Simri Bakhtiyarpur",
-    "Sonbarsa",
-    "Mahishi",
-    "Kahara",
-    "Madhepura",
-    "Supaul",
-    "Birpur",
-  ],
-  state: "Bihar",
+  towns: ["Koramangala", "Indiranagar", "Jayanagar", "Whitefield", "Malleshwaram"],
+  state: "Karnataka",
   searchTerms: [
     "doctor",
     "clinic",
@@ -76,18 +72,15 @@ export const config = {
     "cardiologist",
     "chest physician",
   ],
-  allowedDistricts: ["Saharsa", "Madhepura", "Supaul"],
+  allowedDistricts: ["Bengaluru", "Bangalore"],
   // Spellings Google uses in addresses for the towns above.
   townAliases: {
-    Kahara: ["Kahra"],
-    "Simri Bakhtiyarpur": ["Simri Bakhtiarpur", "Simri-Bakhtiyarpur"],
-    Mahishi: ["Mahisi"],
-    Sonbarsa: ["Sonbarsa Raj", "Sonvarsa"],
+    Malleshwaram: ["Malleswaram"],
   },
   // An address with no district name still passes when it names a listed
-  // town and its PIN starts with one of these (852 = Saharsa postal
-  // division, 8543 = Birpur area). Keeps out same-named towns elsewhere.
-  allowedPinPrefixes: ["852", "8543"],
+  // town and its PIN starts with one of these (560 = Bengaluru). Keeps out
+  // same-named places elsewhere.
+  allowedPinPrefixes: ["560"],
   cacheDir: "./cache",
   outputDir: "./output",
   verifiedFile: "./data/verified.csv",
@@ -246,6 +239,71 @@ export function validateConfig(cfg) {
   if (problems.length > 0) {
     throw new ConfigError(`Invalid configuration:\n  - ${problems.join("\n  - ")}`);
   }
+}
+
+/** Settings a local config file may override. */
+const OVERRIDABLE = [
+  "towns",
+  "state",
+  "searchTerms",
+  "allowedDistricts",
+  "townAliases",
+  "allowedPinPrefixes",
+  "cacheDir",
+  "outputDir",
+  "verifiedFile",
+  "api",
+  "sites",
+];
+
+/**
+ * Merge local overrides into a base config. `api` and `sites` are merged
+ * key by key; every other setting is replaced whole.
+ * @param {Config} base
+ * @param {object} overrides
+ * @returns {Config}
+ * @throws {ConfigError} on a setting that cannot be overridden.
+ */
+export function mergeConfig(base, overrides) {
+  const unknown = Object.keys(overrides).filter((key) => !OVERRIDABLE.includes(key));
+  if (unknown.length > 0) {
+    throw new ConfigError(
+      `Unknown setting(s) in local config: ${unknown.join(", ")}\n  Allowed: ${OVERRIDABLE.join(", ")}`
+    );
+  }
+  const merged = { ...base, ...overrides };
+  for (const key of ["api", "sites"]) {
+    if (overrides[key] !== undefined) merged[key] = { ...base[key], ...overrides[key] };
+  }
+  return merged;
+}
+
+/**
+ * The config for this run: the defaults above, with any settings from a
+ * local JSON file laid over them. The file is optional and git-ignored, so
+ * a private target area never has to be committed.
+ * @param {string} [file]
+ * @returns {Config}
+ * @throws {ConfigError} when the file exists but is not valid.
+ */
+export function loadConfig(file = LOCAL_CONFIG_FILE) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return config;
+    throw new ConfigError(`Could not read ${file}: ${err.message}`);
+  }
+  let overrides;
+  try {
+    overrides = JSON.parse(text);
+  } catch (err) {
+    throw new ConfigError(`${file} is not valid JSON: ${err.message}`);
+  }
+  if (overrides === null || typeof overrides !== "object" || Array.isArray(overrides)) {
+    throw new ConfigError(`${file} must contain a JSON object`);
+  }
+  return mergeConfig(config, overrides);
 }
 
 /**

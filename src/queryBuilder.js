@@ -8,7 +8,7 @@ import { ConfigError } from "./config.js";
 /**
  * @typedef {object} Query
  * @property {string} term Search term, e.g. "pediatrician".
- * @property {string} town Town searched, e.g. "Saharsa".
+ * @property {string} town Town searched, e.g. "Koramangala".
  * @property {string} textQuery Text sent to the API: "<term> in <town>, <state>".
  */
 

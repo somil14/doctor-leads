@@ -49,10 +49,10 @@ export function normalizePhone(raw) {
 /**
  * Whether a normalised number is a mobile.
  *
- * Mobiles start with +91[6-9], but so do landlines in this region: the STD
- * codes for Saharsa (06478), Madhepura (06476) and Supaul (06473) all begin
- * with 6. Google formats mobiles as two 5-digit groups ("98765 43210") and
- * landlines as STD code + subscriber number ("6478 223 344"), so when the
+ * Mobiles start with +91[6-9], but so do landlines in many areas: Bengaluru
+ * numbers begin 080, and several STD codes begin with 6 or 7. Google
+ * formats mobiles as two 5-digit groups ("98765 43210") and landlines as
+ * STD code + subscriber number ("80 2345 6789"), so when the
  * raw formatting is available it is used to rule landlines out.
  * @param {string | null} e164 Output of {@link normalizePhone}.
  * @param {string | null} [raw] The number as formatted by the API.
@@ -94,7 +94,7 @@ function spellings(town, aliases) {
  * Whether an address is inside the target area. It is when it names an
  * allowed district, or when it names a listed town (any spelling) and its
  * PIN code starts with an allowed prefix. Google leaves the district out
- * of some addresses ("Batraha, Kahra, Bihar 852201"); the PIN check keeps
+ * of some addresses ("4th Block, Koramangala 560034"); the PIN check keeps
  * same-named towns in other districts out.
  * @param {string} address
  * @param {AreaRules} rules
@@ -155,11 +155,12 @@ export function toRecord(place, { textQuery, term, fetchedAt }) {
 /**
  * Extract the town from an address by matching against the towns list.
  *
- * District names double as town names and appear in most addresses
- * ("..., Simri Bakhtiyarpur, Saharsa, Bihar 852127"), and town names also
- * appear inside road names ("Supaul Road, Saharsa"). So a town that is a
- * whole comma-separated segment beats one that is merely mentioned, and a
- * non-district town beats a district name. Ties go to the rightmost match.
+ * A district name can double as a town name and then appears in most
+ * addresses ("..., Anekal, Bengaluru, Karnataka 562106"), and town names
+ * also appear inside road names ("Whitefield Main Rd, Mahadevapura"). So a
+ * town that is a whole comma-separated segment beats one that is merely
+ * mentioned, and a non-district town beats a district name. Ties go to the
+ * rightmost match.
  * @param {string} address
  * @param {string[]} towns
  * @param {string[]} [districts] Town names that are also district names.
@@ -168,7 +169,7 @@ export function toRecord(place, { textQuery, term, fetchedAt }) {
  */
 export function extractTown(address, towns, districts = [], aliases = {}) {
   const lower = String(address ?? "").toLowerCase();
-  // Drop PIN codes so "Saharsa 852201" still counts as a whole segment.
+  // Drop PIN codes so "Bengaluru 560034" still counts as a whole segment.
   const segments = lower.split(",").map((s) => s.replace(/\d+/g, "").trim());
   const districtSet = new Set(districts.map((d) => d.toLowerCase()));
 

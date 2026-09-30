@@ -6,10 +6,11 @@
  */
 
 import "dotenv/config";
+import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import pLimit from "p-limit";
 
-import { config, validateConfig, loadEnv, ConfigError } from "./config.js";
+import { loadConfig, validateConfig, loadEnv, ConfigError, LOCAL_CONFIG_FILE } from "./config.js";
 import { buildQueries, estimateMaxCalls, selectSubset } from "./queryBuilder.js";
 import { createCache } from "./cache.js";
 import { createPlacesClient, MaxCallsError } from "./placesClient.js";
@@ -29,6 +30,9 @@ import { createMxChecker } from "./enrich/emailVerify.js";
 import { enrichLeads } from "./enrich/index.js";
 import { loadVerified, applyVerified, verificationSheet } from "./enrich/verified.js";
 
+/** @type {import("./config.js").Config} Set once at startup by main(). */
+let config;
+
 const HELP = `doctor-leads — doctors, clinics and hospitals via Google Places API (New)
 
 Usage: doctor-leads [options]
@@ -43,7 +47,7 @@ Options:
 
 Examples:
   doctor-leads --dry-run
-  doctor-leads --towns "Saharsa,Supaul" --terms "pediatrician,gynecologist"
+  doctor-leads --towns "Koramangala,Indiranagar" --terms "pediatrician,gynecologist"
   doctor-leads --max-calls 50
   doctor-leads --max-calls 0        # reprocess cached data, no API spend
 `;
@@ -204,7 +208,9 @@ async function enrich(leads, { skipSites }) {
 
 /** Run the CLI. */
 async function main() {
+  config = loadConfig();
   validateConfig(config);
+  if (existsSync(LOCAL_CONFIG_FILE)) console.log(`Using local config ${LOCAL_CONFIG_FILE}`);
   const cli = parseCli(process.argv.slice(2));
   if (cli.help) {
     console.log(HELP);

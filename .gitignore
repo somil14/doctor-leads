@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Private target area (overrides src/config.js)
+config.local.json
+
 # Secrets
 .env
 .env.*

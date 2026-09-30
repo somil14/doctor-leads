@@ -1,6 +1,6 @@
 {
   "name": "doctor-leads",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Collect publicly listed doctors, clinics and hospitals via the Google Places API (New), then check and score their contact details.",
   "type": "module",
   "bin": {

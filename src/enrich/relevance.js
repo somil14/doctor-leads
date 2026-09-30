@@ -2,7 +2,7 @@
  * @module enrich/relevance
  * Relevance gate: drops listings that are not medical practices at all.
  * Text Search returns the odd interior decorator or laptop shop for a
- * query like "doctor in Saharsa".
+ * query like "doctor in Koramangala".
  */
 
 import { matchSpecialty } from "../classify.js";

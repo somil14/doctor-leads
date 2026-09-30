@@ -8,9 +8,9 @@ A Node.js CLI that builds a list of publicly listed doctors, clinics and
 hospitals for a set of towns, then checks and scores how far each phone number
 and email can be trusted.
 
-Towns, search terms and area rules are plain config, so it can be pointed at any
-Indian city or district. This README uses Bangalore (Bengaluru, Karnataka) as
-its reference example.
+It ships configured for Bangalore (Bengaluru, Karnataka). Towns, search terms
+and area rules are plain config, so it can be pointed at any Indian city or
+district.
 
 ## Contents
 
@@ -79,7 +79,6 @@ git clone https://github.com/somil14/doctor-leads.git
 cd doctor-leads
 npm install
 cp .env.example .env        # put your key in .env
-# set your towns and area rules in src/config.js (see Configuration)
 npm run dry-run             # see what a run would cost; no API calls
 node src/index.js --towns Koramangala --terms pediatrician --max-calls 3
 ```
@@ -148,7 +147,8 @@ responses. Delete the folder by hand when you want fresh data.
 
 ## Configuration
 
-Everything lives in [`src/config.js`](src/config.js) and is validated at startup.
+Defaults live in [`src/config.js`](src/config.js). Anything in an optional
+`config.local.json` overrides them, and the result is validated at startup.
 
 | Setting | Meaning |
 | --- | --- |
@@ -162,8 +162,7 @@ Everything lives in [`src/config.js`](src/config.js) and is validated at startup
 | `api.*` | Endpoint, field mask, page size, pages per query, concurrency, retry and timeout settings |
 | `sites.*` | User agent, pages per site, concurrency, delay, timeout and the list of hosts never fetched |
 
-To target an area, set `towns`, `state`, `allowedDistricts`, `townAliases` and
-`allowedPinPrefixes`. For Bangalore:
+The shipped defaults target Bangalore:
 
 ```js
 towns: ["Koramangala", "Indiranagar", "Jayanagar", "Whitefield", "Malleshwaram"],
@@ -177,6 +176,26 @@ With this config a query reads `"pediatrician in Koramangala, Karnataka"`, and a
 place is kept when its address says Bengaluru or Bangalore, or names one of the
 listed localities with a PIN starting 560. The names passed to `--towns` must
 match entries in `towns`.
+
+### Targeting your own area
+
+Create `config.local.json` in the directory you run the tool from. It is
+git-ignored, so your target area stays private and survives `git pull`.
+
+```json
+{
+  "towns": ["Mysuru", "Mandya", "Srirangapatna"],
+  "state": "Karnataka",
+  "allowedDistricts": ["Mysuru", "Mysore", "Mandya"],
+  "townAliases": { "Mysuru": ["Mysore"], "Srirangapatna": ["Srirangapattana"] },
+  "allowedPinPrefixes": ["570", "571"]
+}
+```
+
+Any setting in the table above can be overridden. `api` and `sites` are merged
+key by key, so `{ "api": { "concurrency": 1 } }` changes only that value; every
+other setting replaces the default whole. The run prints
+`Using local config ./config.local.json` when the file is picked up.
 
 ## Output
 
@@ -294,7 +313,7 @@ flowchart TD
 
 | Module | Responsibility |
 | --- | --- |
-| `src/config.js` | Towns, terms, area rules, API and website settings; validates config and env |
+| `src/config.js` | Default towns, terms, area rules, API and website settings; loads `config.local.json`; validates config and env |
 | `src/queryBuilder.js` | Towns × terms query matrix; resolves `--towns` / `--terms` |
 | `src/placesClient.js` | Text Search requests: pagination, backoff with jitter, call budget, stale page-token recovery |
 | `src/cache.js` | One JSON file per API request, keyed by `sha1(query + pageToken)` |
@@ -336,6 +355,7 @@ flowchart TD
 src/                 application code (see Modules)
   enrich/            contact enrichment and verification
 test/                node:test unit tests, one file per area
+config.local.json    optional private overrides of src/config.js (git-ignored)
 data/                verified.csv lives here (git-ignored); example file is tracked
 cache/               raw API responses and fetched pages (git-ignored)
 output/              generated results (git-ignored)
@@ -345,8 +365,8 @@ output/              generated results (git-ignored)
 ## Cost
 
 - Each query follows `nextPageToken` for up to 3 pages (60 results), so the
-  maximum is `towns × terms × 3` requests. Five Bangalore localities × 15 terms
-  is 75 queries and at most 225 requests. Dense city areas usually fill all
+  maximum is `towns × terms × 3` requests. The default config (5 localities ×
+  15 terms) is 75 queries and at most 225 requests. Dense city areas usually fill all
   three pages; small towns often return one.
 - The field mask includes phone, website and rating fields, which places every
   request in the **Text Search Enterprise** SKU. Check the current price and free
@@ -375,7 +395,8 @@ checklist; the full rules and process are below.
 ### Rules
 
 1. **No real data in the repository.** No API keys, and no real names, phone
-   numbers, emails or files from `cache/`, `output/` or `data/`. Use invented
+   numbers, emails, `config.local.json`, or files from `cache/`, `output/` or
+   `data/`. Use invented
    values in tests (`Dr. A Kumar`, `+919876543210`, `example.org`).
 2. **No new data sources without discussion.** Open an issue first. Sources that
    forbid automated access, or that expose data people did not publish

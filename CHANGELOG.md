@@ -6,10 +6,21 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-30
+
+### Added
+
+- Optional `config.local.json`: private, git-ignored overrides of
+  `src/config.js`, so a target area never has to be committed.
+- Tests for config validation, merging and loading.
+
 ### Changed
 
-- README uses Bangalore as its reference example and documents an example
-  area configuration.
+- The shipped default area is now Bangalore (Koramangala, Indiranagar,
+  Jayanagar, Whitefield, Malleshwaram). To keep a previous area, put its
+  `towns`, `state`, `allowedDistricts`, `townAliases` and `allowedPinPrefixes`
+  in `config.local.json`.
+- README and code comments use Bangalore as the reference example.
 
 ## [1.0.0] - 2026-09-30
 
@@ -38,5 +49,6 @@ First release.
 - CSV and JSON output, excluded-records file and a console summary.
 - Unit tests for every module and a GitHub Actions workflow.
 
-[Unreleased]: https://github.com/somil14/doctor-leads/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/somil14/doctor-leads/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/somil14/doctor-leads/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/somil14/doctor-leads/releases/tag/v1.0.0
