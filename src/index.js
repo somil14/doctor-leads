@@ -7,6 +7,8 @@
 
 import "dotenv/config";
 import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { parseArgs } from "node:util";
 import pLimit from "p-limit";
 
@@ -29,6 +31,8 @@ import { createSiteFetcher } from "./enrich/siteFetcher.js";
 import { createMxChecker } from "./enrich/emailVerify.js";
 import { enrichLeads } from "./enrich/index.js";
 import { loadVerified, applyVerified, verificationSheet } from "./enrich/verified.js";
+import { townCentre, maxCellsPerTown } from "./nearby.js";
+import { hasSegment, selectSegment, callListRows } from "./segment.js";
 
 /** @type {import("./config.js").Config} Set once at startup by main(). */
 let config;
@@ -42,7 +46,10 @@ Options:
   --towns <list>   Comma-separated subset of configured towns
   --terms <list>   Comma-separated subset of configured search terms
   --max-calls <N>  Stop making API calls after N requests (0 = cache only)
+  --nearby         Also sweep each town with Nearby Search (extra API calls)
   --skip-sites     Do not fetch practice websites for emails and phone checks
+  --reviews-under <N>  Call list: only leads with fewer than N reviews
+  --weak-website       Call list: only leads with no working website of their own
   -h, --help       Show this help
 
 Examples:
@@ -50,12 +57,13 @@ Examples:
   doctor-leads --towns "Koramangala,Indiranagar" --terms "pediatrician,gynecologist"
   doctor-leads --max-calls 50
   doctor-leads --max-calls 0        # reprocess cached data, no API spend
+  doctor-leads --max-calls 0 --reviews-under 10 --weak-website   # write a call list
 `;
 
 /**
  * Parse and validate CLI flags.
  * @param {string[]} argv
- * @returns {{help: boolean, dryRun: boolean, skipSites: boolean, towns: string[], terms: string[], maxCalls: number}}
+ * @returns {{help: boolean, dryRun: boolean, nearby: boolean, skipSites: boolean, towns: string[], terms: string[], maxCalls: number, reviewsUnder: number | undefined, weakWebsite: boolean}}
  * @throws {ConfigError} on unknown flags or invalid values.
  */
 function parseCli(argv) {
@@ -66,6 +74,9 @@ function parseCli(argv) {
       options: {
         "dry-run": { type: "boolean", default: false },
         "skip-sites": { type: "boolean", default: false },
+        nearby: { type: "boolean", default: false },
+        "reviews-under": { type: "string" },
+        "weak-website": { type: "boolean", default: false },
         towns: { type: "string" },
         terms: { type: "string" },
         "max-calls": { type: "string" },
@@ -84,9 +95,23 @@ function parseCli(argv) {
     }
   }
 
+  let reviewsUnder;
+  if (values["reviews-under"] !== undefined) {
+    reviewsUnder = Number(values["reviews-under"]);
+    if (!Number.isInteger(reviewsUnder) || reviewsUnder < 1) {
+      throw new ConfigError("--reviews-under must be a positive integer");
+    }
+  }
+  if (values["weak-website"] && values["skip-sites"]) {
+    throw new ConfigError("--weak-website needs the website check; remove --skip-sites");
+  }
+
   return {
     help: values.help,
     dryRun: values["dry-run"],
+    nearby: values.nearby,
+    reviewsUnder,
+    weakWebsite: values["weak-website"],
     skipSites: values["skip-sites"],
     towns: selectSubset(values.towns, config.towns, "--towns"),
     terms: selectSubset(values.terms, config.searchTerms, "--terms"),
@@ -97,10 +122,10 @@ function parseCli(argv) {
 /**
  * Print what a run would cost without calling the API.
  * @param {import("./queryBuilder.js").Query[]} queries
- * @param {{towns: string[], terms: string[]}} selection
+ * @param {{towns: string[], terms: string[], nearby: boolean}} selection
  * @param {import("./cache.js").Cache} cache
  */
-async function dryRun(queries, { towns, terms }, cache) {
+async function dryRun(queries, { towns, terms, nearby }, cache) {
   const cached = (
     await Promise.all(queries.map((q) => cache.has(cache.key(q.textQuery))))
   ).filter(Boolean).length;
@@ -118,6 +143,86 @@ async function dryRun(queries, { towns, terms }, cache) {
     `Already cached: ${cached} queries → at most ` +
       `${estimateMaxCalls(uncached, config.api.maxPages)} new calls for the remaining ${uncached}`
   );
+  if (nearby) {
+    const perTown = maxCellsPerTown(config.nearby.maxDepth);
+    console.log(
+      `Nearby sweep: 1 to ${perTown} calls per town → at most ${perTown * towns.length} ` +
+        `more for ${towns.length} towns (billed as Nearby Search, a separate SKU)`
+    );
+  }
+}
+
+/**
+ * Sweep each selected town with Nearby Search, centred on the town's
+ * configured centre or on the median position of its Text Search results.
+ * A derived centre is saved in the cache directory and reused, so later
+ * runs sweep the same circles and hit the cache even when the set of
+ * results has changed.
+ * @param {ReturnType<typeof createPlacesClient>} client
+ * @param {string[]} towns
+ * @param {Array<{place: object}>} textHits
+ * @returns {Promise<Array<{place: object, fetchedAt: string, query: import("./queryBuilder.js").Query}>>}
+ */
+async function nearbySweep(client, towns, textHits) {
+  const located = [];
+  for (const { place } of textHits) {
+    if (filterReason(place, config)) continue;
+    located.push({
+      town: extractTown(
+        place.formattedAddress,
+        config.towns,
+        config.allowedDistricts,
+        config.townAliases
+      ),
+      lat: place.location?.latitude ?? null,
+      lng: place.location?.longitude ?? null,
+    });
+  }
+
+  const centresFile = path.join(config.cacheDir, "town-centres.json");
+  let saved = {};
+  try {
+    saved = JSON.parse(await readFile(centresFile, "utf8"));
+  } catch {
+    // none saved yet
+  }
+
+  console.log("\nNearby sweep…");
+  const hits = [];
+  for (const town of towns) {
+    const centre =
+      config.townCenters[town] ??
+      saved[town] ??
+      townCentre(located.filter((p) => p.town === town), config.nearby.minSamples);
+    if (centre && !config.townCenters[town] && !saved[town]) {
+      saved[town] = centre;
+      await mkdir(config.cacheDir, { recursive: true });
+      await writeFile(centresFile, JSON.stringify(saved, null, 2));
+    }
+    if (!centre) {
+      console.warn(
+        `  ${town}: skipped, too few Text Search results to place its centre ` +
+          "(set config.townCenters to sweep it)"
+      );
+      continue;
+    }
+    let result;
+    try {
+      result = await client.searchNearbyGrid(centre);
+    } catch (err) {
+      console.error(`  ${town}: nearby sweep failed — ${err.message}`);
+      if (err.fatal) break;
+      continue;
+    }
+    const query = { term: "", town, textQuery: `nearby search around ${town}` };
+    for (const hit of result.hits) hits.push({ ...hit, query });
+    console.log(
+      `  ${town}: ${result.cells} circles → ${result.hits.length} places` +
+        (result.saturated ? `, ${result.saturated} circles still full at the smallest size` : "") +
+        (result.truncated ? " (stopped at --max-calls)" : "")
+    );
+  }
+  return hits;
 }
 
 /**
@@ -132,6 +237,7 @@ function processHits(hits) {
     const record = toRecord(place, {
       textQuery: query.textQuery,
       term: query.term,
+      town: query.town,
       fetchedAt,
     });
     const reason = filterReason(place, config);
@@ -148,16 +254,19 @@ function processHits(hits) {
       continue;
     }
     const specialty = classifySpecialty(record);
+    const addressTown = extractTown(
+      record.address,
+      config.towns,
+      config.allowedDistricts,
+      config.townAliases
+    );
     leads.push({
       ...record,
       entityType: detectEntityType(record.name),
       specialty,
-      town: extractTown(
-        record.address,
-        config.towns,
-        config.allowedDistricts,
-        config.townAliases
-      ),
+      // A village address names no listed town; file it under the town
+      // whose search found it.
+      town: addressTown === "Unknown" && record.searchTown ? record.searchTown : addressTown,
       priority: computePriority(specialty, record.reviewCount),
     });
   }
@@ -177,7 +286,7 @@ function processHits(hits) {
  * the manually verified overrides.
  * @param {object[]} leads
  * @param {{skipSites: boolean}} options
- * @returns {Promise<{leads: object[], removed: object[], sheet: object[], siteStats: object | null}>}
+ * @returns {Promise<{leads: object[], removed: object[], sheet: object[], verified: Map<string, object>, siteStats: object | null}>}
  */
 async function enrich(leads, { skipSites }) {
   const fetcher = skipSites
@@ -202,6 +311,7 @@ async function enrich(leads, { skipSites }) {
     leads: result.leads,
     removed: result.removed,
     sheet: verificationSheet(result.leads, verified),
+    verified,
     siteStats: fetcher?.stats ?? null,
   };
 }
@@ -229,6 +339,7 @@ async function main() {
   const client = createPlacesClient({
     apiKey,
     api: config.api,
+    nearby: config.nearby,
     cache,
     maxCalls: cli.maxCalls,
   });
@@ -284,10 +395,19 @@ async function main() {
     );
   }
 
+  if (cli.nearby && !fatal) hits.push(...(await nearbySweep(client, cli.towns, hits)));
+
   const processed = processHits(hits);
-  const { leads, removed, sheet, siteStats } = await enrich(processed.leads, cli);
+  const { leads, removed, sheet, verified, siteStats } = await enrich(processed.leads, cli);
   const excluded = [...processed.excluded, ...removed];
-  const paths = await writeOutputs({ leads, excluded, sheet, outputDir: config.outputDir });
+  const segment = hasSegment(cli) ? selectSegment(leads, cli) : null;
+  const paths = await writeOutputs({
+    leads,
+    excluded,
+    sheet,
+    callList: segment && callListRows(segment, verified),
+    outputDir: config.outputDir,
+  });
 
   printSummary({
     leads,
@@ -301,6 +421,12 @@ async function main() {
   console.log(`Wrote ${paths.json}`);
   console.log(`Wrote ${paths.excludedCsv}`);
   console.log(`Wrote ${paths.sheetCsv}`);
+  if (segment) {
+    const reachable = segment.filter((lead) => lead.phone).length;
+    console.log(
+      `Wrote ${paths.callListCsv} (${segment.length} leads, ${reachable} with a phone)`
+    );
+  }
   if (failures.length > 0) process.exitCode = 1;
 }
 

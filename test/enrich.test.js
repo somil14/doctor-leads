@@ -37,6 +37,20 @@ test("relevanceReason drops listings that are not medical", () => {
   for (const record of drop) assert.equal(relevanceReason(record), "not_medical", record.name);
 });
 
+test("relevanceReason drops shops that Google files under doctor or hospital", () => {
+  const drop = [
+    rec("Lenskart.com at Supaul", { primaryType: "doctor" }),
+    rec("City Opticals", { primaryType: "doctor" }),
+    rec("Sudha Enterprises", { primaryType: "hospital" }),
+    rec("Koshi Surgicals", { primaryType: "medical_clinic" }),
+    rec("Health Store", { primaryType: "doctor" }),
+  ];
+  for (const record of drop) assert.equal(relevanceReason(record), "not_medical", record.name);
+  assert.equal(relevanceReason(rec("Netra Eye Hospital & Opticals")), null);
+  assert.equal(relevanceReason(rec("City Laparoscopic & Surgical Centre", { primaryType: "hospital" })), null);
+  assert.equal(relevanceReason(rec("Dr. A Kumar Optical Clinic")), null);
+});
+
 test("relevanceReason keeps medical names and medical types", () => {
   const keep = [
     rec("Dr. G S Singh", { primaryType: "housing_complex" }),

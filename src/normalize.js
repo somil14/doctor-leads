@@ -21,6 +21,7 @@
  * @property {string} primaryType
  * @property {string[]} matchedQueries Full query texts that returned this place.
  * @property {string[]} matchedTerms Search terms that returned this place.
+ * @property {string} searchTown Town whose search first returned this place.
  * @property {string} fetchedAt ISO timestamp.
  */
 
@@ -87,13 +88,15 @@ function spellings(town, aliases) {
  * @property {string[]} allowedDistricts
  * @property {string[]} [towns]
  * @property {Record<string, string[]>} [townAliases]
- * @property {string[]} [allowedPinPrefixes]
+ * @property {string[]} [allowedPinPrefixes] Accepted together with a listed town.
+ * @property {string[]} [areaPinPrefixes] Accepted on their own.
  */
 
 /**
  * Whether an address is inside the target area. It is when it names an
- * allowed district, or when it names a listed town (any spelling) and its
- * PIN code starts with an allowed prefix. Google leaves the district out
+ * allowed district, when its PIN code starts with an area prefix, or when
+ * it names a listed town (any spelling) and its PIN code starts with an
+ * allowed prefix. Google leaves the district out
  * of some addresses ("4th Block, Koramangala 560034"); the PIN check keeps
  * same-named towns in other districts out.
  * @param {string} address
@@ -105,7 +108,9 @@ export function inTargetArea(address, rules) {
   if (rules.allowedDistricts.some((d) => lower.includes(d.toLowerCase()))) return true;
 
   const pin = lower.match(/\b\d{6}\b/)?.[0];
-  if (!pin || !(rules.allowedPinPrefixes ?? []).some((p) => pin.startsWith(p))) return false;
+  if (!pin) return false;
+  if ((rules.areaPinPrefixes ?? []).some((p) => pin.startsWith(p))) return true;
+  if (!(rules.allowedPinPrefixes ?? []).some((p) => pin.startsWith(p))) return false;
   return (rules.towns ?? []).some((town) =>
     spellings(town, rules.townAliases ?? {}).some((name) => lower.includes(name))
   );
@@ -125,10 +130,10 @@ export function filterReason(place, rules) {
 /**
  * Flatten a raw API place into a lead record.
  * @param {object} place Raw API place.
- * @param {{textQuery: string, term: string, fetchedAt: string}} meta
+ * @param {{textQuery: string, term: string, town?: string, fetchedAt: string}} meta
  * @returns {LeadRecord}
  */
-export function toRecord(place, { textQuery, term, fetchedAt }) {
+export function toRecord(place, { textQuery, term, town = "", fetchedAt }) {
   const international = place.internationalPhoneNumber ?? null;
   const national = place.nationalPhoneNumber ?? null;
   const phone = normalizePhone(international) ?? normalizePhone(national);
@@ -147,7 +152,8 @@ export function toRecord(place, { textQuery, term, fetchedAt }) {
     types: place.types ?? [],
     primaryType: place.primaryType ?? "",
     matchedQueries: [textQuery],
-    matchedTerms: [term],
+    matchedTerms: term ? [term] : [],
+    searchTown: town,
     fetchedAt,
   };
 }

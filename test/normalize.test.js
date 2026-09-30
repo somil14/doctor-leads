@@ -97,6 +97,15 @@ test("toRecord flattens a place and tolerates missing fields", () => {
   assert.equal(record.lat, 25.88);
   assert.deepEqual(record.matchedQueries, ["doctor in Saharsa, Bihar"]);
   assert.deepEqual(record.matchedTerms, ["doctor"]);
+  assert.equal(record.searchTown, "");
+  assert.equal(
+    toRecord({ id: "y" }, { textQuery: "q", term: "", town: "Supaul", fetchedAt: "now" }).searchTown,
+    "Supaul"
+  );
+  assert.deepEqual(
+    toRecord({ id: "y" }, { textQuery: "q", term: "", fetchedAt: "now" }).matchedTerms,
+    []
+  );
 
   const bare = toRecord({ id: "x" }, { textQuery: "q", term: "t", fetchedAt: "now" });
   assert.equal(bare.name, "");
@@ -138,6 +147,13 @@ test("inTargetArea rejects same-named towns elsewhere and unlisted places", () =
   assert.equal(inTargetArea("Birpur, Begusarai Rd, Bihar", RULES), false);
   assert.equal(inTargetArea("Some Village, Bihar 852201", RULES), false);
   assert.equal(inTargetArea("Boring Road, Patna, Bihar 800001", RULES), false);
+});
+
+test("inTargetArea accepts an area PIN prefix on its own", () => {
+  const rules = { ...RULES, areaPinPrefixes: ["852"] };
+  assert.equal(inTargetArea("Main Rd, Some Village, Bihar 852201", rules), true);
+  assert.equal(inTargetArea("Main Rd, Some Village, Bihar 854301", rules), false);
+  assert.equal(inTargetArea("Main Rd, Some Village, Bihar", rules), false);
 });
 
 test("extractTown understands alternate spellings", () => {

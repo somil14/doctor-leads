@@ -32,6 +32,23 @@ test("classifySpecialty matches keywords in the name", () => {
   }
 });
 
+test("classifySpecialty marks alternative and allied practices", () => {
+  for (const name of [
+    "Anand Homoeo Clinic",
+    "Dr. A Kumar Homeo Hall",
+    "AYURVEDA KIDNEY TREATMENT CENTRE",
+    "City Physiotherapy & Rehab Centre",
+    "acupressure clinic",
+    "Chandsi Dava Khana",
+  ]) {
+    assert.equal(classifySpecialty(rec(name)), "Alternative/Allied", name);
+  }
+  assert.equal(
+    classifySpecialty(rec("Dr. A Kumar", { matchedTerms: ["pediatrician"] })),
+    "Pediatrics"
+  );
+});
+
 test("classifySpecialty prefers the specific specialty over Hospital and GP", () => {
   assert.equal(classifySpecialty(rec("Dr. Kumar Child Hospital")), "Pediatrics");
   assert.equal(classifySpecialty(rec("Chest Physician Dr. Rao")), "Chest");
@@ -109,6 +126,13 @@ test("exclusionReason keeps providers that also mention a pharmacy or lab", () =
   assert.equal(exclusionReason(rec("Dr. Jha Clinic and Medical Store")), null);
   assert.equal(exclusionReason(rec("Life Care Clinic", { primaryType: "pharmacy" })), null);
   assert.equal(exclusionReason(rec("Dr. A Kumar")), null);
+});
+
+test("lab chains and Hindi lab names are excluded", () => {
+  assert.equal(exclusionReason(rec("Dr Lal PathLabs - Patient Service Centre")), "diagnostic_lab");
+  assert.equal(exclusionReason(rec("Pathocare Janch Ghar")), "diagnostic_lab");
+  assert.equal(exclusionReason(rec("City Path Lab")), "diagnostic_lab");
+  assert.equal(exclusionReason(rec("Dr. Lalit Kumar")), null);
 });
 
 test("a doctor's name in brackets does not rescue a lab or pharmacy", () => {

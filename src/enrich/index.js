@@ -15,7 +15,28 @@ import { phoneConfidence, emailConfidence } from "./confidence.js";
 const EMAIL_TYPE_RANK = { named: 0, other: 1, role: 2 };
 
 /**
+ * What kind of web presence a lead's website link is.
+ * @param {string} url The lead's website.
+ * @param {import("../config.js").SitesConfig} sites
+ * @param {boolean | null} loaded Whether the site returned a page; null when
+ *   websites were not fetched.
+ * @returns {"none" | "platform_link" | "free_site_builder" | "not_loading" | "own_site" | "not_checked"}
+ */
+export function websiteStatus(url, sites, loaded) {
+  const kind = siteKind(url, sites.skipHosts);
+  if (kind === "none") return "none";
+  if (kind === "platform") return "platform_link";
+  const host = hostOf(url);
+  if (sites.builderHosts.some((b) => host === b || host.endsWith(`.${b}`))) {
+    return "free_site_builder";
+  }
+  if (loaded === null) return "not_checked";
+  return loaded ? "own_site" : "not_loading";
+}
+
+/**
  * @typedef {object} SiteContacts
+ * @property {boolean} loaded Whether any page of the site returned HTML.
  * @property {string[]} phones E.164 numbers found on the site.
  * @property {Array<{email: string, source: string}>} emails With the page each was first seen on.
  */
@@ -36,7 +57,7 @@ export function contactsFromPages(pages) {
       if (!emails.some((e) => e.email === email)) emails.push({ email, source: page.url });
     }
   }
-  return { phones, emails };
+  return { loaded: pages.length > 0, phones, emails };
 }
 
 /**
@@ -143,7 +164,11 @@ export async function enrichLeads(leads, { fetchSite, checkMx, sites, placeWords
     leads.map(async (lead) => {
       const site = byUrl.has(lead.website) ? await byUrl.get(lead.website) : null;
       const siteShared = (hostCounts.get(hostOf(lead.website ?? "")) ?? 0) > 1;
-      return enrichLead(lead, site, { siteShared, checkMx, placeWords });
+      const enriched = await enrichLead(lead, site, { siteShared, checkMx, placeWords });
+      return {
+        ...enriched,
+        websiteStatus: websiteStatus(lead.website, sites, fetchSite ? site?.loaded ?? false : null),
+      };
     })
   );
 }

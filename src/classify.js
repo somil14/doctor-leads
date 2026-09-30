@@ -17,6 +17,7 @@ export const SPECIALTIES = [
   "Chest",
   "Dental",
   "Hospital/Nursing Home",
+  "Alternative/Allied",
   "Unknown",
 ];
 
@@ -26,6 +27,9 @@ export const SPECIALTIES = [
  * @type {Array<[string, RegExp]>}
  */
 const SPECIALTY_RULES = [
+  // Homeopathy, ayurveda, physiotherapy and the like say what kind of
+  // practice this is before any specialty does, so they are matched first.
+  ["Alternative/Allied", /homo?eo|ayurved|\bunani\b|naturopath|acupressure|acupuncture|neurotherap|physiotherap|\bphysio\b|chandsi|da[wv]a ?khana|\byoga\b/i],
   ["Pediatrics", /pa?ediatric|\bchild|\bbaby|\bkids?\b|neonat|shishu|\bbal rog/i],
   ["Gynecology", /gyna?ec|\bgyne\b|obstetric|maternity|\bwom[ae]n|mahila|prasuti|stri rog|\bivf\b|fertility/i],
   ["Dental", /dental|dentist|orthodont|\bteeth\b|\btooth\b/i],
@@ -58,7 +62,9 @@ const WEAK_TYPE_SPECIALTY = {
 const PROVIDER_RE = /^\s*dr\b|doctor|clinic|hospital|nursing home|physician/i;
 const VET_RE = /veterinar|\bvet\b|\bpets?\b|animal|pashu/i;
 const PHARMACY_RE = /pharmac|chemist|medical (store|hall|shop|agency)|medicos|drug ?(store|house)|\bdrugs\b|dawa/i;
-const LAB_RE = /patholog|diagnos|\blabs?\b|laborator|x-? ?ray|ultrasound|sonograph|scan cent(er|re)|imaging|\bct scan\b|\bmri\b/i;
+// Collection-centre chains; "Dr Lal PathLabs" is a lab despite the "Dr".
+const LAB_BRAND_RE = /lal path|thyrocare|metropolis|redcliffe|healthians|\bsrl\b/i;
+const LAB_RE = /path ?labs?|janch|जाँच|जांच|collection cent(er|re)|blood test|patholog|diagnos|\blabs?\b|laborator|x-? ?ray|ultrasound|sonograph|scan cent(er|re)|imaging|\bct scan\b|\bmri\b/i;
 
 /**
  * First specialty whose keywords match the text.
@@ -91,6 +97,7 @@ export function exclusionReason(record) {
   ) {
     return "veterinary";
   }
+  if (LAB_BRAND_RE.test(name)) return "diagnostic_lab";
   if (PROVIDER_RE.test(name)) return null;
   if (primaryType === "pharmacy" || primaryType === "drugstore" || PHARMACY_RE.test(name)) {
     return "pharmacy";

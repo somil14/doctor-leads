@@ -1,11 +1,12 @@
 /**
  * @module placesClient
- * Thin client for the Google Places API (New) Text Search endpoint with
- * disk caching, pagination, retry with exponential backoff and a hard
- * cap on the number of HTTP requests.
+ * Thin client for the Google Places API (New) Text Search and Nearby
+ * Search endpoints with disk caching, pagination, retry with exponential
+ * backoff and a hard cap on the number of HTTP requests.
  */
 
 import { setTimeout as delay } from "node:timers/promises";
+import { cellCircle, childCells } from "./nearby.js";
 
 /** Error returned by the API (or the network) after retries are exhausted. */
 export class ApiError extends Error {
@@ -76,15 +77,21 @@ function errorMessage(text) {
  * @param {object} options
  * @param {string} options.apiKey
  * @param {import("./config.js").ApiConfig} options.api
+ * @param {import("./config.js").NearbyConfig} [options.nearby] Needed for searchNearbyGrid.
  * @param {import("./cache.js").Cache} options.cache
  * @param {number} [options.maxCalls] Hard stop on HTTP requests.
  * @param {typeof fetch} [options.fetchImpl] Injectable for tests.
  * @param {(ms: number) => Promise<unknown>} [options.sleep] Injectable for tests.
- * @returns {{searchText: (textQuery: string) => Promise<PlaceHit[]>, stats: ClientStats}}
+ * @returns {{
+ *   searchText: (textQuery: string) => Promise<PlaceHit[]>,
+ *   searchNearbyGrid: (centre: {lat: number, lng: number}) => Promise<NearbyResult>,
+ *   stats: ClientStats
+ * }}
  */
 export function createPlacesClient({
   apiKey,
   api,
+  nearby,
   cache,
   maxCalls = Infinity,
   fetchImpl = fetch,
@@ -93,25 +100,32 @@ export function createPlacesClient({
   /** @type {ClientStats} */
   const stats = { apiCalls: 0, cacheHits: 0, retries: 0 };
 
-  const headers = {
+  const textHeaders = {
     "Content-Type": "application/json",
     "X-Goog-Api-Key": apiKey,
     "X-Goog-FieldMask": api.fieldMask.join(","),
+  };
+  // Nearby Search has no paging, so the mask must not ask for a page token.
+  const nearbyHeaders = {
+    ...textHeaders,
+    "X-Goog-FieldMask": api.fieldMask.filter((f) => f.startsWith("places.")).join(","),
   };
 
   /**
    * POST one request, retrying on 429/5xx/network errors.
    * @param {object} body
+   * @param {string} [endpoint]
+   * @param {Record<string, string>} [headers]
    * @returns {Promise<object>} Parsed response body.
    */
-  async function request(body) {
+  async function request(body, endpoint = api.endpoint, headers = textHeaders) {
     for (let attempt = 0; ; attempt++) {
       if (stats.apiCalls >= maxCalls) throw new MaxCallsError(maxCalls);
       stats.apiCalls++;
 
       let res;
       try {
-        res = await fetchImpl(api.endpoint, {
+        res = await fetchImpl(endpoint, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
@@ -231,5 +245,69 @@ export function createPlacesClient({
     }
   }
 
-  return { searchText, stats };
+  /**
+   * Fetch one Nearby Search circle, from cache when present.
+   * @param {import("./nearby.js").Cell} cell
+   * @returns {Promise<import("./cache.js").CacheEntry>}
+   */
+  async function fetchCell(cell) {
+    const body = {
+      includedTypes: nearby.includedTypes,
+      maxResultCount: nearby.maxResultCount,
+      regionCode: api.regionCode,
+      languageCode: api.languageCode,
+      locationRestriction: { circle: cellCircle(cell) },
+    };
+    const textQuery = `nearby:${JSON.stringify(body)}`;
+    const key = cache.key(textQuery);
+    const hit = await cache.get(key);
+    if (hit) {
+      stats.cacheHits++;
+      return hit;
+    }
+    const response = await request(body, nearby.endpoint, nearbyHeaders);
+    const entry = { textQuery, pageToken: null, fetchedAt: new Date().toISOString(), response };
+    await cache.set(key, entry);
+    return entry;
+  }
+
+  /**
+   * @typedef {object} NearbyResult
+   * @property {PlaceHit[]} hits
+   * @property {number} cells Circles searched.
+   * @property {number} saturated Circles still full at the deepest level:
+   *   places there may have been missed.
+   * @property {boolean} truncated The sweep stopped early at --max-calls.
+   */
+
+  /**
+   * Sweep a square around a centre with Nearby Search. A circle that comes
+   * back full is split into four, down to `nearby.maxDepth`.
+   * @param {{lat: number, lng: number}} centre
+   * @returns {Promise<NearbyResult>}
+   */
+  async function searchNearbyGrid(centre) {
+    const result = { hits: [], cells: 0, saturated: 0, truncated: false };
+    const queue = [{ ...centre, halfSide: nearby.halfSideMeters, depth: 0 }];
+    while (queue.length > 0) {
+      const cell = queue.shift();
+      let entry;
+      try {
+        entry = await fetchCell(cell);
+      } catch (err) {
+        if (!(err instanceof MaxCallsError)) throw err;
+        result.truncated = true;
+        break;
+      }
+      result.cells++;
+      const places = entry.response.places ?? [];
+      for (const place of places) result.hits.push({ place, fetchedAt: entry.fetchedAt });
+      if (places.length < nearby.maxResultCount) continue;
+      if (cell.depth < nearby.maxDepth) queue.push(...childCells(cell));
+      else result.saturated++;
+    }
+    return result;
+  }
+
+  return { searchText, searchNearbyGrid, stats };
 }

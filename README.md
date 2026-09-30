@@ -31,8 +31,9 @@ district.
 
 ## What it does
 
-1. **Collects listings** from the official Google Places API (New) Text Search
-   endpoint, one query per town × search term.
+1. **Collects listings** from the official Google Places API (New): Text Search,
+   one query per town × search term, and optionally a Nearby Search grid sweep
+   of each town to catch what Text Search misses.
 2. **Cleans them**: keeps operational places inside the target area, normalises
    phones, merges duplicates, and removes pharmacies, labs, vets and listings
    that are not medical at all.
@@ -104,7 +105,10 @@ node src/index.js [options]
 | `--towns <list>` | Comma-separated subset of the towns in `src/config.js` |
 | `--terms <list>` | Comma-separated subset of the search terms in `src/config.js` |
 | `--max-calls <N>` | Stop sending API requests after N. `0` uses the cache only |
+| `--nearby` | Also sweep each town with Nearby Search. Extra API calls, billed as a separate SKU |
 | `--skip-sites` | Do not fetch practice websites |
+| `--reviews-under <N>` | Write a call list of leads with fewer than N reviews |
+| `--weak-website` | Write a call list of leads with no working website of their own |
 | `-h`, `--help` | Show usage |
 
 Examples:
@@ -124,6 +128,12 @@ node src/index.js --max-calls 0
 
 # Cost estimate for one town
 node src/index.js --dry-run --towns Jayanagar
+
+# Add the grid sweep for fuller coverage
+node src/index.js --nearby
+
+# Call list: small practices without a real website, built from cache
+node src/index.js --max-calls 0 --nearby --reviews-under 10 --weak-website
 ```
 
 Run `npm link` to install the `doctor-leads` command globally. The tool reads
@@ -158,6 +168,9 @@ Defaults live in [`src/config.js`](src/config.js). Anything in an optional
 | `allowedDistricts` | An address naming one of these is inside the target area |
 | `townAliases` | Alternate spellings Google uses, e.g. `Malleshwaram` → `Malleswaram` |
 | `allowedPinPrefixes` | An address with no district name still passes if it names a listed town and its PIN starts with one of these |
+| `areaPinPrefixes` | An address passes on the PIN alone if it starts with one of these. Use it when a postal division matches your districts, to keep village listings |
+| `nearby.*` | Grid sweep: place types, size of the square swept around each town, how many times a full circle is split |
+| `townCenters` | Centre of each town's sweep as `{ lat, lng }`. Towns left out use the median position of their Text Search results |
 | `verifiedFile` | Path of the manually verified contacts file |
 | `api.*` | Endpoint, field mask, page size, pages per query, concurrency, retry and timeout settings |
 | `sites.*` | User agent, pages per site, concurrency, delay, timeout and the list of hosts never fetched |
@@ -205,6 +218,7 @@ Written to `./output/`:
 | --- | --- |
 | `doctors_<YYYYMMDD>.csv` / `.json` | The leads, sorted by priority then review count |
 | `verification_sheet_<YYYYMMDD>.csv` | The same leads laid out for manual confirmation |
+| `call_list_<YYYYMMDD>.csv` | Written with `--reviews-under` / `--weak-website`: the matching leads, reachable ones first, with WhatsApp links and the fill-in columns |
 | `excluded_<YYYYMMDD>.csv` | Everything left out, with a `reason` |
 
 Exclusion reasons: `pharmacy`, `diagnostic_lab`, `veterinary`, `not_medical`,
@@ -216,8 +230,8 @@ Exclusion reasons: `pharmacy`, `diagnostic_lab`, `veterinary`, `not_medical`,
 | --- | --- |
 | `id`, `name`, `address`, `website`, `rating`, `reviewCount`, `lat`, `lng`, `mapsUrl` | From the Google listing |
 | `entityType` | `individual_doctor` if the name starts with Dr., else `clinic_or_hospital` |
-| `specialty` | GP/Physician, Pediatrics, Gynecology, Orthopedics, ENT, Dermatology, Diabetology, Cardiology, Chest, Dental, Hospital/Nursing Home or Unknown |
-| `town` | Matched against the towns list in the address |
+| `specialty` | GP/Physician, Pediatrics, Gynecology, Orthopedics, ENT, Dermatology, Diabetology, Cardiology, Chest, Dental, Hospital/Nursing Home, Alternative/Allied (homeopathy, ayurveda, physiotherapy and similar) or Unknown |
+| `town` | Matched against the towns list in the address; for an address that names none, the town whose search found it |
 | `priority` | A: GP/Physician, Pediatrics or Gynecology with 20+ reviews. B: 5+ reviews. C: the rest |
 | `matchedQueries`, `fetchedAt` | Which searches returned the place, and when |
 | `phone` | E.164 (`+91XXXXXXXXXX`) |
@@ -232,6 +246,7 @@ Exclusion reasons: `pharmacy`, `diagnostic_lab`, `veterinary`, `not_medical`,
 | `emailConfidence` | `verified`, `high`, `medium` or `low` |
 | `altEmails` | Other addresses found |
 | `verifiedAt`, `consent` | From `data/verified.csv` |
+| `websiteStatus` | `own_site`, `free_site_builder`, `platform_link` (social or booking page), `not_loading`, `none`, or `not_checked` with `--skip-sites` |
 
 ### Confidence levels
 
@@ -283,6 +298,28 @@ Verified values override everything collected automatically and are applied on
 every run. Each new sheet already contains the earlier verified rows, so saving
 it over `data/verified.csv` loses nothing. Untouched rows are ignored.
 
+### Call list
+
+To work a segment instead of every lead, add `--reviews-under <N>` and/or
+`--weak-website`. The run then also writes `call_list_<date>.csv`: the matching
+leads with mobiles first, then landlines, then those with no phone (use the
+Maps link). It has the same fill-in columns as the verification sheet and can be
+saved as `data/verified.csv` in the same way.
+
+`whatsappLink` opens a chat with that number. Send one personal message per
+practice; bulk or automated messaging gets numbers banned and is not what this
+tool is for.
+
+A call that works, in under a minute:
+
+1. Say who you are and which company you are calling from.
+2. Confirm you have reached the practice and the doctor named on the listing.
+3. Ask for the best number to reach the doctor directly.
+4. Ask whether the doctor would like information by email and, if yes, which
+   address. Record `consent` as `yes` only when they say so.
+5. Note anything that makes the lead unusable (`remove`) or the number wrong
+   (`wrong_number`).
+
 ## Architecture
 
 ### Pipeline
@@ -290,7 +327,7 @@ it over `data/verified.csv` loses nothing. Untouched rows are ignored.
 ```mermaid
 flowchart TD
     CFG[config.js<br/>towns × terms] --> QB[queryBuilder]
-    QB --> PC[placesClient<br/>paging, retry, max-calls]
+    QB --> PC[placesClient<br/>Text Search + Nearby grid<br/>paging, retry, max-calls]
     PC <--> C1[(cache/<br/>raw API responses)]
     PC --> N[normalize<br/>area filter, E.164 phone]
     N --> D[dedupe<br/>place id, then phone + name]
@@ -305,7 +342,8 @@ flowchart TD
     EV --> CO[enrich/confidence<br/>phone and email levels]
     CO --> V[enrich/verified<br/>manual overrides]
     VF[(data/verified.csv)] --> V
-    V --> OUT[export<br/>CSV, JSON, verification sheet, summary]
+    V --> SG[segment<br/>call list filters]
+    SG --> OUT[export<br/>CSV, JSON, verification sheet, call list, summary]
     OUT -. a person fills the sheet .-> VF
 ```
 
@@ -315,7 +353,8 @@ flowchart TD
 | --- | --- |
 | `src/config.js` | Default towns, terms, area rules, API and website settings; loads `config.local.json`; validates config and env |
 | `src/queryBuilder.js` | Towns × terms query matrix; resolves `--towns` / `--terms` |
-| `src/placesClient.js` | Text Search requests: pagination, backoff with jitter, call budget, stale page-token recovery |
+| `src/placesClient.js` | Text Search and Nearby Search requests: pagination, grid sweep, backoff with jitter, call budget, stale page-token recovery |
+| `src/nearby.js` | Grid geometry: town centre, covering circle, splitting a cell in four |
 | `src/cache.js` | One JSON file per API request, keyed by `sha1(query + pageToken)` |
 | `src/normalize.js` | Status and area filter, phone normalisation, town extraction |
 | `src/dedupe.js` | Merge by place id, then by phone when the names also match |
@@ -328,6 +367,7 @@ flowchart TD
 | `src/enrich/confidence.js` | Confidence level for each phone and email |
 | `src/enrich/verified.js` | Reads `data/verified.csv`, applies overrides, builds the verification sheet |
 | `src/enrich/index.js` | Orchestrates enrichment across leads |
+| `src/segment.js` | Segment filters (`--reviews-under`, `--weak-website`) and the call list |
 | `src/export.js` | CSV and JSON writers, console summary |
 | `src/index.js` | CLI entry point; wires the pipeline together |
 
@@ -372,6 +412,11 @@ output/              generated results (git-ignored)
   request in the **Text Search Enterprise** SKU. Check the current price and free
   allowance before a full run:
   https://developers.google.com/maps/billing-and-pricing/pricing
+- `--nearby` adds 1 to 21 requests per town with the default settings (a circle
+  that returns the maximum of 20 places is split in four, twice at most), billed
+  as **Nearby Search Enterprise**, a separate SKU with its own free allowance.
+  The run reports circles that were still full at the smallest size; raise
+  `nearby.maxDepth` to split further at the cost of more calls.
 - A cached page is never requested again. Retried requests (429/5xx) count as
   calls and count toward `--max-calls`.
 - Website lookups and mail-domain checks cost nothing.

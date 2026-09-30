@@ -39,6 +39,32 @@ export const COLUMNS = [
   "altEmails",
   "verifiedAt",
   "consent",
+  "websiteStatus",
+];
+
+/** Column order of call_list_<YYYYMMDD>.csv. */
+export const CALL_LIST_COLUMNS = [
+  "id",
+  "name",
+  "entityType",
+  "specialty",
+  "town",
+  "address",
+  "reviewCount",
+  "websiteStatus",
+  "mapsUrl",
+  "foundPhone",
+  "phoneType",
+  "phoneConfidence",
+  "phoneSharedWith",
+  "whatsappLink",
+  "foundEmail",
+  "phone",
+  "email",
+  "consent",
+  "status",
+  "verifiedAt",
+  "notes",
 ];
 
 /** Column order of verification_sheet_<YYYYMMDD>.csv. */
@@ -122,11 +148,19 @@ async function writeCsv(file, columns, records) {
  * @param {object[]} input.leads Fully enriched lead records.
  * @param {object[]} input.excluded Records left out, each with a `reason`.
  * @param {object[]} input.sheet Rows of the verification sheet.
+ * @param {object[] | null} [input.callList] Rows of the call list; null writes none.
  * @param {string} input.outputDir
  * @param {Date} [input.date]
- * @returns {Promise<{csv: string, json: string, excludedCsv: string, sheetCsv: string}>} Paths written.
+ * @returns {Promise<{csv: string, json: string, excludedCsv: string, sheetCsv: string, callListCsv: string | null}>} Paths written.
  */
-export async function writeOutputs({ leads, excluded, sheet, outputDir, date = new Date() }) {
+export async function writeOutputs({
+  leads,
+  excluded,
+  sheet,
+  callList = null,
+  outputDir,
+  date = new Date(),
+}) {
   await mkdir(outputDir, { recursive: true });
   const stamp = dateStamp(date);
   const paths = {
@@ -134,6 +168,7 @@ export async function writeOutputs({ leads, excluded, sheet, outputDir, date = n
     json: path.join(outputDir, `doctors_${stamp}.json`),
     excludedCsv: path.join(outputDir, `excluded_${stamp}.csv`),
     sheetCsv: path.join(outputDir, `verification_sheet_${stamp}.csv`),
+    callListCsv: callList ? path.join(outputDir, `call_list_${stamp}.csv`) : null,
   };
   await writeCsv(paths.csv, COLUMNS, leads);
   await writeFile(
@@ -142,6 +177,7 @@ export async function writeOutputs({ leads, excluded, sheet, outputDir, date = n
   );
   await writeCsv(paths.excludedCsv, EXCLUDED_COLUMNS, excluded);
   await writeCsv(paths.sheetCsv, SHEET_COLUMNS, sheet);
+  if (callList) await writeCsv(paths.callListCsv, CALL_LIST_COLUMNS, callList);
   return paths;
 }
 

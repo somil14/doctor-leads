@@ -34,6 +34,17 @@ export const LOCAL_CONFIG_FILE = "./config.local.json";
  * @property {number} timeoutMs Per-request timeout.
  * @property {number} maxBytes HTML kept per page.
  * @property {string[]} skipHosts Hosts that are never fetched.
+ * @property {string[]} builderHosts Free page-builder hosts.
+ */
+
+/**
+ * @typedef {object} NearbyConfig
+ * @property {string} endpoint Places API (New) Nearby Search URL.
+ * @property {string[]} includedTypes Place types to sweep for.
+ * @property {number} maxResultCount Results per circle (max 20).
+ * @property {number} halfSideMeters Half the side of the square swept around a town centre.
+ * @property {number} maxDepth How many times a full cell may be split in four.
+ * @property {number} minSamples Text Search results needed to place a town centre.
  */
 
 /**
@@ -44,9 +55,12 @@ export const LOCAL_CONFIG_FILE = "./config.local.json";
  * @property {string[]} allowedDistricts Post-filter applied to the address.
  * @property {Record<string, string[]>} townAliases Alternate spellings per town.
  * @property {string[]} allowedPinPrefixes PIN prefixes accepted with a town match.
+ * @property {string[]} areaPinPrefixes PIN prefixes accepted on their own.
  * @property {string} cacheDir
  * @property {string} outputDir
  * @property {string} verifiedFile CSV of manually verified contact details.
+ * @property {NearbyConfig} nearby
+ * @property {Record<string, {lat: number, lng: number}>} townCenters
  * @property {SitesConfig} sites
  * @property {ApiConfig} api
  */
@@ -81,9 +95,27 @@ export const config = {
   // town and its PIN starts with one of these (560 = Bengaluru). Keeps out
   // same-named places elsewhere.
   allowedPinPrefixes: ["560"],
+  // PIN prefixes that lie wholly inside the target area: an address with
+  // one of these passes on the PIN alone, listed town or not. Use it for a
+  // postal division that matches your districts, to keep village listings.
+  areaPinPrefixes: [],
   cacheDir: "./cache",
   outputDir: "./output",
   verifiedFile: "./data/verified.csv",
+  // Optional grid sweep (--nearby). Text Search stops at 60 results per
+  // query; Nearby Search returns 20 per circle and no more, so a circle
+  // that comes back full is split into four smaller ones.
+  nearby: {
+    endpoint: "https://places.googleapis.com/v1/places:searchNearby",
+    includedTypes: ["doctor", "hospital", "medical_clinic", "general_hospital"],
+    maxResultCount: 20,
+    halfSideMeters: 3000,
+    maxDepth: 2,
+    minSamples: 3,
+  },
+  // Centre of each town's sweep as { lat, lng }. Towns left out get the
+  // median position of their Text Search results.
+  townCenters: {},
   sites: {
     userAgent: "doctor-leads/1.0 (contact-page lookup; respects robots.txt)",
     maxPagesPerSite: 4,
@@ -114,6 +146,18 @@ export const config = {
       "lybrate.com",
       "sulekha.com",
       "indiamart.com",
+    ],
+    // Free page builders: a page here is not a site of the practice's own.
+    builderHosts: [
+      "ueniweb.com",
+      "grexa.site",
+      "getmy.clinic",
+      "github.io",
+      "business.site",
+      "wixsite.com",
+      "blogspot.com",
+      "wordpress.com",
+      "weebly.com",
     ],
   },
   api: {
@@ -186,6 +230,12 @@ export function validateConfig(cfg) {
   if (!isNonEmptyStringArray(cfg.allowedPinPrefixes)) {
     problems.push("config.allowedPinPrefixes must be a non-empty array of PIN prefixes");
   }
+  if (
+    !Array.isArray(cfg.areaPinPrefixes) ||
+    !cfg.areaPinPrefixes.every((p) => typeof p === "string" && /^\d{1,6}$/.test(p))
+  ) {
+    problems.push("config.areaPinPrefixes must be an array of PIN prefixes (digits)");
+  }
   for (const [town, aliases] of Object.entries(cfg.townAliases ?? {})) {
     if (!cfg.towns?.includes(town)) {
       problems.push(`config.townAliases has "${town}", which is not in config.towns`);
@@ -194,12 +244,40 @@ export function validateConfig(cfg) {
       problems.push(`config.townAliases["${town}"] must be a non-empty array of strings`);
     }
   }
+  const nearby = cfg.nearby ?? {};
+  if (typeof nearby.endpoint !== "string" || !nearby.endpoint.startsWith("https://")) {
+    problems.push("config.nearby.endpoint must be an https URL");
+  }
+  if (!isNonEmptyStringArray(nearby.includedTypes)) {
+    problems.push("config.nearby.includedTypes must be a non-empty array of place types");
+  }
+  const nearbyRanges = {
+    maxResultCount: [1, 20],
+    halfSideMeters: [100, 35000],
+    maxDepth: [0, 4],
+    minSamples: [1, 100],
+  };
+  for (const [key, [min, max]] of Object.entries(nearbyRanges)) {
+    if (!Number.isInteger(nearby[key]) || nearby[key] < min || nearby[key] > max) {
+      problems.push(`config.nearby.${key} must be an integer between ${min} and ${max}`);
+    }
+  }
+  for (const [town, centre] of Object.entries(cfg.townCenters ?? {})) {
+    if (!cfg.towns?.includes(town)) {
+      problems.push(`config.townCenters has "${town}", which is not in config.towns`);
+    }
+    if (!Number.isFinite(centre?.lat) || !Number.isFinite(centre?.lng)) {
+      problems.push(`config.townCenters["${town}"] must be { lat, lng } numbers`);
+    }
+  }
   const sites = cfg.sites ?? {};
   if (typeof sites.userAgent !== "string" || sites.userAgent.trim() === "") {
     problems.push("config.sites.userAgent must be a non-empty string");
   }
-  if (!Array.isArray(sites.skipHosts)) {
-    problems.push("config.sites.skipHosts must be an array of host names");
+  for (const key of ["skipHosts", "builderHosts"]) {
+    if (!Array.isArray(sites[key])) {
+      problems.push(`config.sites.${key} must be an array of host names`);
+    }
   }
   for (const key of ["maxPagesPerSite", "concurrency", "delayMs", "timeoutMs", "maxBytes"]) {
     if (!Number.isInteger(sites[key]) || sites[key] < 0) {
@@ -249,16 +327,19 @@ const OVERRIDABLE = [
   "allowedDistricts",
   "townAliases",
   "allowedPinPrefixes",
+  "areaPinPrefixes",
   "cacheDir",
   "outputDir",
   "verifiedFile",
+  "nearby",
+  "townCenters",
   "api",
   "sites",
 ];
 
 /**
- * Merge local overrides into a base config. `api` and `sites` are merged
- * key by key; every other setting is replaced whole.
+ * Merge local overrides into a base config. `api`, `sites` and `nearby` are
+ * merged key by key; every other setting is replaced whole.
  * @param {Config} base
  * @param {object} overrides
  * @returns {Config}
@@ -272,7 +353,7 @@ export function mergeConfig(base, overrides) {
     );
   }
   const merged = { ...base, ...overrides };
-  for (const key of ["api", "sites"]) {
+  for (const key of ["api", "sites", "nearby"]) {
     if (overrides[key] !== undefined) merged[key] = { ...base[key], ...overrides[key] };
   }
   return merged;

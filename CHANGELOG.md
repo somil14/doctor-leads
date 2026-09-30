@@ -6,6 +6,28 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--nearby`: Nearby Search grid sweep around each town. A circle that comes
+  back full is split in four, up to `nearby.maxDepth` times. Sweep centres are
+  saved in the cache directory so later runs reuse the cached circles.
+- `--reviews-under <N>` and `--weak-website`: write `call_list_<date>.csv` for
+  the matching leads, with WhatsApp links and the verification columns.
+- `websiteStatus` column.
+- `areaPinPrefixes`: PIN prefixes that place an address in the target area on
+  their own, which keeps village listings that name no listed town.
+- `townCenters` and `nearby` config settings.
+- `Alternative/Allied` specialty for homeopathy, ayurveda, physiotherapy and
+  similar practices.
+
+### Changed
+
+- A lead whose address names no listed town is filed under the town whose
+  search found it, instead of `Unknown`.
+- Opticians, surgical-supply shops and other shop-like names are excluded as
+  `not_medical` even when Google types them as a doctor or hospital.
+- Lab chains and Hindi lab names are excluded as `diagnostic_lab`.
+
 ## [1.1.0] - 2026-09-30
 
 ### Added
