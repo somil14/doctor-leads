@@ -8,9 +8,9 @@ A Node.js CLI that builds a list of publicly listed doctors, clinics and
 hospitals for a set of towns, then checks and scores how far each phone number
 and email can be trusted.
 
-It ships configured for Saharsa district (Bihar, India) and nearby towns. Towns,
-search terms and area rules are plain config, so it can be pointed at any
-Indian district.
+Towns, search terms and area rules are plain config, so it can be pointed at any
+Indian city or district. This README uses Bangalore (Bengaluru, Karnataka) as
+its reference example.
 
 ## Contents
 
@@ -79,8 +79,9 @@ git clone https://github.com/somil14/doctor-leads.git
 cd doctor-leads
 npm install
 cp .env.example .env        # put your key in .env
+# set your towns and area rules in src/config.js (see Configuration)
 npm run dry-run             # see what a run would cost; no API calls
-node src/index.js --towns Saharsa --terms pediatrician --max-calls 3
+node src/index.js --towns Koramangala --terms pediatrician --max-calls 3
 ```
 
 `.env`:
@@ -114,7 +115,7 @@ Examples:
 node src/index.js
 
 # Two towns, two specialties
-node src/index.js --towns "Saharsa,Supaul" --terms "pediatrician,gynecologist"
+node src/index.js --towns "Koramangala,Indiranagar" --terms "pediatrician,gynecologist"
 
 # Cap spending at 50 API requests; finished pages stay cached
 node src/index.js --max-calls 50
@@ -123,7 +124,7 @@ node src/index.js --max-calls 50
 node src/index.js --max-calls 0
 
 # Cost estimate for one town
-node src/index.js --dry-run --towns Madhepura
+node src/index.js --dry-run --towns Jayanagar
 ```
 
 Run `npm link` to install the `doctor-leads` command globally. The tool reads
@@ -134,7 +135,7 @@ it is run from.
 
 | Script | Runs | Purpose |
 | --- | --- | --- |
-| `npm start` | `node src/index.js` | Full run. Pass flags after `--`, e.g. `npm start -- --towns Saharsa` |
+| `npm start` | `node src/index.js` | Full run. Pass flags after `--`, e.g. `npm start -- --towns Koramangala` |
 | `npm run dry-run` | `node src/index.js --dry-run` | Cost estimate, no API calls |
 | `npm run reprocess` | `node src/index.js --max-calls 0` | Rebuild output from cache, no API spend |
 | `npm test` | `node --test` | Unit tests |
@@ -155,14 +156,27 @@ Everything lives in [`src/config.js`](src/config.js) and is validated at startup
 | `state` | Appended to every query: `"<term> in <town>, <state>"` |
 | `searchTerms` | Terms to search in each town |
 | `allowedDistricts` | An address naming one of these is inside the target area |
-| `townAliases` | Alternate spellings Google uses, e.g. `Kahara` → `Kahra` |
+| `townAliases` | Alternate spellings Google uses, e.g. `Malleshwaram` → `Malleswaram` |
 | `allowedPinPrefixes` | An address with no district name still passes if it names a listed town and its PIN starts with one of these |
 | `verifiedFile` | Path of the manually verified contacts file |
 | `api.*` | Endpoint, field mask, page size, pages per query, concurrency, retry and timeout settings |
 | `sites.*` | User agent, pages per site, concurrency, delay, timeout and the list of hosts never fetched |
 
-To target another area, change `towns`, `state`, `allowedDistricts`,
-`townAliases` and `allowedPinPrefixes`.
+To target an area, set `towns`, `state`, `allowedDistricts`, `townAliases` and
+`allowedPinPrefixes`. For Bangalore:
+
+```js
+towns: ["Koramangala", "Indiranagar", "Jayanagar", "Whitefield", "Malleshwaram"],
+state: "Karnataka",
+allowedDistricts: ["Bengaluru", "Bangalore"],
+townAliases: { Malleshwaram: ["Malleswaram"] },
+allowedPinPrefixes: ["560"],
+```
+
+With this config a query reads `"pediatrician in Koramangala, Karnataka"`, and a
+place is kept when its address says Bengaluru or Bangalore, or names one of the
+listed localities with a PIN starting 560. The names passed to `--towns` must
+match entries in `towns`.
 
 ## Output
 
@@ -331,8 +345,9 @@ output/              generated results (git-ignored)
 ## Cost
 
 - Each query follows `nextPageToken` for up to 3 pages (60 results), so the
-  maximum is `towns × terms × 3` requests. The default config is 120 queries and
-  at most 360 requests; small towns usually return one page.
+  maximum is `towns × terms × 3` requests. Five Bangalore localities × 15 terms
+  is 75 queries and at most 225 requests. Dense city areas usually fill all
+  three pages; small towns often return one.
 - The field mask includes phone, website and rating fields, which places every
   request in the **Text Search Enterprise** SKU. Check the current price and free
   allowance before a full run:
